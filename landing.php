@@ -1,3 +1,11 @@
+<?php
+session_start();
+
+?>
+
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,12 +21,15 @@
 <section class="hero">
     <div class="container">
         <div class="hero-content">
-            <div class="hero-text">
-                <div class="text-box">
-                    <h1>Caring for your pet while you travel</h1>
-                </div>
-                <a href="auth/register.php" class="register-btn">Register</a>
-            </div>
+           <div class="hero-text">
+    <div class="text-box">
+        <h1>Caring for your pet while you travel</h1>
+    </div>
+ <?php if (!isset($_SESSION['user'])): ?>
+    <a href="auth/register.php" class="register-btn">Register</a>
+<?php endif; ?>
+</div>
+
             <div class="pet-images">
                 <img src="assets/img/dog-and-cat-free-illustration-icons-free-png 1.png" alt="Cat" class="pet-img">
             </div>
@@ -126,10 +137,9 @@
     <!-- Comments Section -->
     <section class="comments">
         <div class="container">
-            <h2>Leave a comment</h2>
+            
             <div class="comment-form">
-                <input type="text" class="comment-input" placeholder="Comment">
-                <button class="comment-btn">done</button>
+               
             </div>
             
             <div class="comment">

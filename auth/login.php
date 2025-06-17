@@ -1,9 +1,8 @@
 <?php
 session_start();
-require_once '../config/db.php'; // Make sure the path matches your project
+require_once '../config/db.php'; // Ensure path matches your project structure
 
 $errors = [];
-
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email']);
@@ -21,21 +20,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($user && password_verify($password, $user['Password'])) {
                 // Successful login - save session data
                 $_SESSION['user'] = [
-                    'id' => $user['ID'],
+                    'id' => $user['UserID'], 
                     'fullname' => $user['FullName'],
                     'email' => $user['Email']
                 ];
-                header("Location: ../landing.php"); // Change this to match your page path
+                header("Location: ../landing.php"); // Updated to redirect to profile.php
                 exit;
             } else {
                 $errors[] = "Incorrect email or password.";
             }
         } catch (PDOException $e) {
-            $errors[] = "An error occurred during login: " . $e->getMessage();
+            $errors[] = "An error occurred during login: " . htmlspecialchars($e->getMessage());
         }
     }
 }
-
 ?>
 
 <!DOCTYPE html>
@@ -48,17 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     body {
       background-color: #f9faf5;
       font-family: "Roboto", sans-serif;
-    
       height: 100vh;
       margin: 0;
     }
-    .herologin{
+    .herologin {
       display: flex;
       justify-content: center;
       align-items: center;
       height: 90vh;
     }
-
     .login-container {
       background-color: white;
       padding: 30px 40px;
@@ -68,26 +64,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
       width: 400px;
       text-align: center;
-      
     }
-
     h2 {
       margin-bottom: 20px;
       font-family: "Roboto Serif", serif;
     }
-
     form {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
     }
-
     label {
       margin: 8px 0 4px;
       font-size: 14px;
       color: #333;
     }
-
     input {
       width: 100%;
       padding: 8px;
@@ -95,11 +86,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       border-radius: 6px;
       font-size: 14px;
     }
-
     button {
       margin-top: 15px;
       width: 100%;
-      background-color: #3aaeff;
+      background-color: #51A4B1;
       color: white;
       padding: 10px;
       border: none;
@@ -108,16 +98,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       font-weight: bold;
       transition: background-color 0.3s ease;
     }
-
     button:hover {
-      background-color: #2291dd;
+      background-color:rgb(72, 151, 164);
     }
-
     .register-link {
       margin-top: 15px;
       font-size: 14px;
     }
-
     .register-link a {
       color: #3aaeff;
       text-decoration: none;
@@ -127,31 +114,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
   <?php include("../includes/header.php"); ?>
   <section class="herologin">
-  <div class="login-container">
-
-    <h2>Log in</h2>
-    <?php if (!empty($errors)): ?>
-  <div style="color: red; text-align: left;">
-    <ul>
-      <?php foreach ($errors as $error): ?>
-        <li><?= htmlspecialchars($error) ?></li>
-      <?php endforeach; ?>
-    </ul>
-  </div>
-<?php endif; ?>
-
-    <form action="#" method="post">
-      <label for="email">Email :</label>
-      <input type="email" id="email" name="email" placeholder="Email" required />
-
-      <label for="password">Password :</label>
-      <input type="password" id="password" name="password" placeholder="Password" required />
-
-      <button type="submit">log in</button>
-    </form>
-    <p class="register-link">Don't have an account? <a href="#">Register</a></p>
-  </div>
+    <div class="login-container">
+      <h2>Log in</h2>
+      <?php if (!empty($errors)): ?>
+        <div style="color: red; text-align: left;">
+          <ul>
+            <?php foreach ($errors as $error): ?>
+              <li><?= htmlspecialchars($error) ?></li>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+      <?php endif; ?>
+      <form action="#" method="post">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" placeholder="Email" required />
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" placeholder="Password" required />
+        <button type="submit">Log in</button>
+      </form>
+      <p class="register-link">Don't have an account? <a href="register.php">Register</a></p>
+    </div>
   </section>
 </body>
 </html>
-

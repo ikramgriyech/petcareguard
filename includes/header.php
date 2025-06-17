@@ -97,7 +97,7 @@ $isAuthPage = strpos($_SERVER['PHP_SELF'], '/auth/') !== false;
 // Paths
 $logoutPath = $isAuthPage ? '../auth/logout.php' : 'auth/logout.php';
 $loginPath = $isAuthPage ? '../auth/login.php' : 'auth/login.php';
-$profilePath = $isAuthPage ? '../guardians/profile.php' : 'guardians/profile.php';
+$profilePath = $isAuthPage ? '../profile.php' : 'profile.php';
 $logoPath = $isAuthPage ? '../assets/img/logo.png' : 'assets/img/logo.png';
 ?>
 
@@ -109,19 +109,17 @@ $logoPath = $isAuthPage ? '../assets/img/logo.png' : 'assets/img/logo.png';
       <?php if (isset($_SESSION['user'])): ?>
         <?php if ($currentPage === 'login.php'): ?>
           <!-- If on login.php and logged in, show only Home -->
-          <li><a href="../landing.php">Home</a></li>
+          <li><a href="#contact">Contact</a></li>
+        <li><a href="#services">Services</a></li>
+        <li><a href="#learn">Home</a></li>
         <?php else: ?>
           <!-- If on other pages and logged in, show all -->
-          <li><a href="landing.php">Contact</a></li>
-          <li><a href="landing.php#services">Services</a></li>
-          <li><a href="landing.php#learn">Learn More</a></li>
+          <li><a href="dashboard.php">Dashboard</a></li>
+          <li><a href="caregivers.php">Cargivers</a></li>
+          <li><a href="landing.php">Home</a></li>
           <li><a href="<?= $profilePath ?>">My Profile</a></li>
         <?php endif; ?>
-      <?php else: ?>
-        <!-- If not logged in -->
-        <li><a href="#contact">Contact</a></li>
-        <li><a href="#services">Services</a></li>
-        <li><a href="#learn">Learn More</a></li>
+
       <?php endif; ?>
     </ul>
 
