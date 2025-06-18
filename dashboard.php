@@ -814,76 +814,7 @@ body {
                 </div>
             </div>
 
-            <div class="requests-section">
-                <div class="section-header">
-                    <h2 class="section-title">Available Caregivers</h2>
-                    <input type="text" class="search-bar" placeholder="Search by city">
-                </div>
-                <?php foreach ($caregivers as $caregiver): ?>
-                <div class="caregiver-card">
-                    <div class="avatar"><?php echo strtoupper(substr($caregiver['FullName'], 0, 2)); ?></div>
-                    <div class="caregiver-info">
-                        <div class="caregiver-name"><?php echo htmlspecialchars($caregiver['FullName']); ?></div>
-                        <div class="caregiver-details">
-                            <?php echo htmlspecialchars($caregiver['Email']); ?> <br>
-                            <?php echo htmlspecialchars($caregiver['PhoneNumber']); ?> <br>
-                            <?php echo htmlspecialchars($caregiver['City']); ?>
-                        </div>
-                        <div class="caregiver-details">
-                            <?php echo htmlspecialchars($caregiver['Bio']); ?>
-                        </div>
-                        <div class="species-buttons">
-                            <?php
-                            $species = explode(',', $caregiver['SpeciesList']);
-                            foreach ($species as $specie) {
-                                echo '<button class="species-btn" onclick="showRequestForm(' . $caregiver['ProfileID'] . ', \'' . trim($specie) . '\')">' . htmlspecialchars(trim($specie)) . '</button>';
-                            }
-                            ?>
-                        </div>
-                        <div class="price">
-                            Price per night: <?php echo htmlspecialchars($caregiver['PricePerNight'] ?? '20'); ?> MAD
-                        </div>
-                    </div>
-                    <button class="request-btn" onclick="showRequestForm(<?php echo $caregiver['ProfileID']; ?>)">Request Care</button>
-                </div>
-                <div class="request-form" id="request-form-<?php echo $caregiver['ProfileID']; ?>">
-                    <?php if (isset($_GET['success']) && $_GET['success'] == 1): ?>
-                        <div class="success-message">Request submitted successfully!</div>
-                    <?php endif; ?>
-                    <h2>Request Care for <?php echo htmlspecialchars($caregiver['FullName']); ?></h2>
-                    <form method="POST">
-                        <input type="hidden" name="action" value="create_request">
-                        <input type="hidden" name="profile_id" value="<?php echo $caregiver['ProfileID']; ?>">
-                        <div class="form-group">
-                            <label for="animal_id">Select Your Pet:</label>
-                            <select name="animal_id" id="animal_id" required>
-                                <option value="">Select a pet</option>
-                                <?php foreach ($pets as $pet): ?>
-                                <option value="<?php echo $pet['AnimalID']; ?>">
-                                    <?php echo htmlspecialchars($pet['Name'] . ' (' . $pet['SpeciesName'] . ')'); ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="start_date">Start Date:</label>
-                            <input type="date" name="start_date" id="start_date" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="end_date">End Date:</label>
-                            <input type="date" name="end_date" id="end_date" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="instructions">Special Instructions:</label>
-                            <textarea name="instructions" id="instructions"></textarea>
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="request-btn">Submit Request</button>
-                        </div>
-                    </form>
-                </div>
-                <?php endforeach; ?>
-            </div>
+            
 
             <div class="requests-section">
                 <div class="section-header">

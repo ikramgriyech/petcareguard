@@ -115,7 +115,7 @@ $logoPath = $isAuthPage ? '../assets/img/logo.png' : 'assets/img/logo.png';
         <?php else: ?>
           <!-- If on other pages and logged in, show all -->
           <li><a href="dashboard.php">Dashboard</a></li>
-          <li><a href="caregivers.php">Cargivers</a></li>
+          <li><a href="caregivers.php">Caregivers</a></li>
           <li><a href="landing.php">Home</a></li>
           <li><a href="<?= $profilePath ?>">My Profile</a></li>
         <?php endif; ?>

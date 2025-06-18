@@ -601,7 +601,7 @@ if ($guardian_profile && is_array($guardian_profile)) {
             <?php endif; ?>
 
             <!-- User Information Form -->
-            <form method="POST" enctype="multipart/form-data" action="update_profile.php">
+            <form method="POST" enctype="multipart/form-data">
                 <div class="form-group">
                     <label for="photo"> Profile Picture</label>
                     <input type="file" name="photo" id="photo" accept="image/*">
