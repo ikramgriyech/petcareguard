@@ -56,12 +56,14 @@ if ($is_petowner) {
 $received_requests = [];
 if ($is_caregiver) {
     $stmt = $conn->prepare("
-        SELECT cr.*, u.FullName, a.Name as PetName, s.Name as SpeciesName
+        SELECT cr.*, u.FullName, GROUP_CONCAT(a.Name) as PetNames, GROUP_CONCAT(s.Name) as SpeciesNames
         FROM carerequest cr
         JOIN _user u ON cr.UserID = u.UserID
-        JOIN animal a ON a.UserID = u.UserID
+        JOIN carerequest_animals cra ON cr.RequestID = cra.RequestID
+        JOIN animal a ON cra.AnimalID = a.AnimalID
         JOIN species s ON a.SpeciesID = s.SpeciesID
         WHERE cr.ProfileID = ?
+        GROUP BY cr.RequestID
     ");
     $stmt->execute([$guardian_profile['ProfileID']]);
     $received_requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -86,22 +88,73 @@ if ($is_caregiver) {
     }
 }
 
+// Get all messages for the user
+$messages = [];
+$stmt = $conn->prepare("
+    SELECT m.*, u.FullName, u.Email, u.PhoneNumber
+    FROM messages m
+    JOIN _user u ON m.SenderID = u.UserID
+    WHERE m.ReceiverID = ?
+    ORDER BY m.CreatedAt DESC
+");
+$stmt->execute([$user_id]);
+$messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get notifications for pet owner (unread only for dashboard display)
+$notifications = [];
+if ($is_petowner) {
+    $stmt = $conn->prepare("
+        SELECT m.*, u.FullName, u.Email, u.PhoneNumber
+        FROM messages m
+        JOIN _user u ON m.SenderID = u.UserID
+        WHERE m.ReceiverID = ? AND m.IsRead = 0
+        ORDER BY m.CreatedAt DESC
+    ");
+    $stmt->execute([$user_id]);
+    $notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Mark notifications as read after fetching
+    $stmt = $conn->prepare("UPDATE messages SET IsRead = 1 WHERE ReceiverID = ? AND IsRead = 0");
+    $stmt->execute([$user_id]);
+}
+
 // Handle request submission (for pet owners)
 if ($_POST && isset($_POST['action']) && $_POST['action'] === 'create_request') {
-    $animal_id = $_POST['animal_id'] ?? 0;
+    $animal_ids = $_POST['animal_ids'] ?? [];
     $profile_id = $_POST['profile_id'] ?? 0;
     $start_date = $_POST['start_date'] ?? '';
     $end_date = $_POST['end_date'] ?? '';
     $instructions = $_POST['instructions'] ?? '';
     
-    if ($animal_id && $profile_id && $start_date && $end_date) {
-        $stmt = $conn->prepare("
-            INSERT INTO carerequest (StartDate, EndDate, SpecialInstructions, Status, ProfileID, UserID)
-            VALUES (?, ?, ?, 'Pending', ?, ?)
-        ");
-        $stmt->execute([$start_date, $end_date, $instructions, $profile_id, $user_id]);
-        header('Location: dashboard.php?success=1');
-        exit();
+    if (!empty($animal_ids) && $profile_id && $start_date && $end_date) {
+        try {
+            $conn->beginTransaction();
+            
+            // Insert care request
+            $stmt = $conn->prepare("
+                INSERT INTO carerequest (StartDate, EndDate, SpecialInstructions, Status, ProfileID, UserID)
+                VALUES (?, ?, ?, 'Pending', ?, ?)
+            ");
+            $stmt->execute([$start_date, $end_date, $instructions, $profile_id, $user_id]);
+            $request_id = $conn->lastInsertId();
+            
+            // Insert animal associations
+            $stmt = $conn->prepare("
+                INSERT INTO carerequest_animals (RequestID, AnimalID)
+                VALUES (?, ?)
+            ");
+            foreach ($animal_ids as $animal_id) {
+                $stmt->execute([$request_id, $animal_id]);
+            }
+            
+            $conn->commit();
+            header('Location: dashboard.php?success=1');
+            exit();
+        } catch (PDOException $e) {
+            $conn->rollBack();
+            header('Location: dashboard.php?error=' . urlencode($e->getMessage()));
+            exit();
+        }
     }
 }
 
@@ -111,8 +164,37 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_request') 
     $status = $_POST['status'] ?? '';
     
     if ($request_id && $status && in_array($status, ['Pending', 'Approved', 'Declined'])) {
+        // Update request status
         $stmt = $conn->prepare("UPDATE carerequest SET Status = ? WHERE RequestID = ? AND ProfileID = ?");
         $stmt->execute([$status, $request_id, $guardian_profile['ProfileID']]);
+        
+        // Get request details for notification
+        $stmt = $conn->prepare("
+            SELECT cr.UserID, gp.UserID as CaregiverID
+            FROM carerequest cr
+            JOIN guardianprofile gp ON cr.ProfileID = gp.ProfileID
+            WHERE cr.RequestID = ?
+        ");
+        $stmt->execute([$request_id]);
+        $request_info = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($request_info) {
+            // Prepare notification message
+            $message_content = '';
+            if ($status === 'Approved') {
+                $message_content = "Your care request has been approved! Contact the caregiver: Email - {$user['Email']}, Phone - {$user['PhoneNumber']}.";
+            } elseif ($status === 'Declined') {
+                $message_content = "Sorry, your care request has been declined.";
+            }
+            
+            // Insert notification into messages table
+            $stmt = $conn->prepare("
+                INSERT INTO messages (SenderID, ReceiverID, RequestID, MessageContent, IsRead)
+                VALUES (?, ?, ?, ?, 0)
+            ");
+            $stmt->execute([$request_info['CaregiverID'], $request_info['UserID'], $request_id, $message_content]);
+        }
+        
         header('Location: dashboard.php');
         exit();
     }
@@ -124,648 +206,46 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_request') 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="assets/css/dashboard.css">
     <title>Pet Care Dashboard</title>
-    <style>
-/* Reset and Base Styles */
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-:root {
-    --primary-color: #3b82f6;
-    --secondary-color: #64748b;
-    --success-color: #10b981;
-    --warning-color: #f59e0b;
-    --danger-color: #ef4444;
-    --pink-color: #ec4899;
-    --yellow-color: #fbbf24;
-    --green-color: #10b981;
-    --background-color: #f8fafc;
-    --card-background: #ffffff;
-    --text-primary: #1e293b;
-    --text-secondary: #64748b;
-    --border-color: #e2e8f0;
-    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-}
-
-body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: var(--background-color);
-    color: var(--text-primary);
-    line-height: 1.6;
-}
-
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 1rem;
-}
-
-/* User Type Toggle */
-.user-type-toggle {
-    display: flex;
-    justify-content: center;
-    margin: 2rem auto;
-    background: var(--card-background);
-    border-radius: 12px;
-    padding: 0.5rem;
-    box-shadow: var(--shadow);
-    max-width: 400px;
-}
-
-.toggle-btn {
-    flex: 1;
-    padding: 0.75rem 1.5rem;
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    font-weight: 500;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.toggle-btn.active {
-    background: var(--primary-color);
-    color: white;
-    box-shadow: var(--shadow);
-}
-
-.toggle-btn:hover:not(.active) {
-    background: #f1f5f9;
-    color: var(--text-primary);
-}
-
-/* Dashboard Header */
-.dashboard-header {
-    text-align: center;
-    margin: 2rem 0;
-}
-
-.dashboard-title {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-}
-
-/* Sidebar */
-.sidebar {
-    background: var(--card-background);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-    box-shadow: var(--shadow);
-}
-
-.sidebar h3 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 1rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.sidebar-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.sidebar-item:last-child {
-    border-bottom: none;
-}
-
-/* Stats Grid */
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-}
-
-.stat-card {
-    background: var(--card-background);
-    border-radius: 12px;
-    padding: 2rem;
-    text-align: center;
-    box-shadow: var(--shadow);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    border-left: 4px solid var(--border-color);
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-}
-
-/* Specific stat card colors */
-.stat-card:nth-child(1) {
-    border-left-color: var(--pink-color);
-    background: linear-gradient(135deg, #fdf2f8 0%, #ffffff 100%);
-}
-
-.stat-card:nth-child(1) .stat-number {
-    color: var(--pink-color);
-}
-
-.stat-card:nth-child(2) {
-    border-left-color: var(--yellow-color);
-    background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
-}
-
-.stat-card:nth-child(2) .stat-number {
-    color: var(--yellow-color);
-}
-
-.stat-card:nth-child(3) {
-    border-left-color: var(--green-color);
-    background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
-}
-
-.stat-card:nth-child(3) .stat-number {
-    color: var(--green-color);
-}
-
-.stat-card:nth-child(4) {
-    border-left-color: var(--primary-color);
-    background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
-}
-
-.stat-card:nth-child(4) .stat-number {
-    color: var(--primary-color);
-}
-
-.stat-number {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-}
-
-.stat-label {
-    color: var(--text-secondary);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 0.875rem;
-}
-
-/* Requests Section */
-.requests-section {
-    margin-bottom: 3rem;
-}
-
-.section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-
-.section-title {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.search-bar {
-    padding: 0.75rem 1rem;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    font-size: 0.875rem;
-    min-width: 250px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.search-bar:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.view-all-btn {
-    color: var(--primary-color);
-    text-decoration: none;
-    font-weight: 500;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    transition: background-color 0.2s ease;
-}
-
-.view-all-btn:hover {
-    background-color: rgba(59, 130, 246, 0.1);
-}
-
-/* Caregiver Cards */
-.caregiver-card {
-    background: var(--card-background);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: var(--shadow);
-    display: flex;
-    gap: 1rem;
-    align-items: flex-start;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.caregiver-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-}
-
-.avatar {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--primary-color), #8b5cf6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 600;
-    font-size: 1.25rem;
-    flex-shrink: 0;
-}
-
-.caregiver-info {
-    flex: 1;
-}
-
-.caregiver-name {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-}
-
-.caregiver-details {
-    color: var(--text-secondary);
-    margin-bottom: 0.75rem;
-    line-height: 1.5;
-}
-
-.species-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-}
-
-.species-btn {
-    padding: 0.25rem 0.75rem;
-    background: #f1f5f9;
-    border: 1px solid var(--border-color);
-    border-radius: 20px;
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.species-btn:hover {
-    background: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
-}
-
-.price {
-    font-weight: 600;
-    color: var(--success-color);
-    font-size: 1.1rem;
-}
-
-.request-btn {
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: 8px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.2s ease, transform 0.2s ease;
-    align-self: flex-start;
-}
-
-.request-btn:hover {
-    background: #2563eb;
-    transform: translateY(-1px);
-}
-
-/* Request Forms */
-.request-form {
-    display: none;
-    background: #f8fafc;
-    border-radius: 12px;
-    padding: 2rem;
-    margin-top: 1rem;
-    border: 1px solid var(--border-color);
-}
-
-.request-form.active {
-    display: block;
-    animation: slideDown 0.3s ease;
-}
-
-@keyframes slideDown {
-    from {
-        opacity: 0;
-        transform: translateY(-10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.request-form h2 {
-    margin-bottom: 1.5rem;
-    color: var(--text-primary);
-    font-size: 1.25rem;
-}
-
-.form-group {
-    margin-bottom: 1.5rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.form-group input,
-.form-group select,
-.form-group textarea {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    font-size: 0.875rem;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.form-group input:focus,
-.form-group select:focus,
-.form-group textarea:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.form-group textarea {
-    resize: vertical;
-    min-height: 100px;
-}
-
-.form-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-}
-
-/* Request Cards */
-.request-card {
-    background: var(--card-background);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    box-shadow: var(--shadow);
-    display: flex;
-    gap: 1rem;
-    align-items: flex-start;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.request-card:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-lg);
-}
-
-.request-info {
-    flex: 1;
-}
-
-.request-name {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-}
-
-.request-details {
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
-}
-
-.request-meta {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-}
-
-.request-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    align-items: flex-end;
-}
-
-/* Status Badges */
-.status {
-    padding: 0.25rem 0.75rem;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.status-pending {
-    background: #fef3c7;
-    color: #92400e;
-}
-
-.status-approved {
-    background: #d1fae5;
-    color: #065f46;
-}
-
-.status-declined {
-    background: #fee2e2;
-    color: #991b1b;
-}
-
-/* Buttons */
-.btn {
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: 1px solid transparent;
-    font-size: 0.875rem;
-}
-
-.btn-primary {
-    background: var(--primary-color);
-    color: white;
-}
-
-.btn-primary:hover {
-    background: #2563eb;
-}
-
-.btn-decline {
-    background: var(--danger-color);
-    color: white;
-}
-
-.btn-decline:hover {
-    background: #dc2626;
-}
-
-.btn-edit-btn {
-    background: #f1f5f9;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-}
-
-.btn-edit-btn:hover {
-    background: #e2e8f0;
-    color: var(--text-primary);
-}
-
-/* Edit Forms */
-.edit-form {
-    display: none;
-    background: #f8fafc;
-    border-radius: 8px;
-    padding: 1.5rem;
-    margin-top: 1rem;
-    border: 1px solid var(--border-color);
-    width: 100%;
-}
-
-.edit-form.active {
-    display: block;
-    animation: slideDown 0.3s ease;
-}
-
-/* Success Message */
-.success-message {
-    background: #d1fae5;
-    color: #065f46;
-    padding: 1rem;
-    border-radius: 8px;
-    margin-bottom: 1rem;
-    border: 1px solid #a7f3d0;
-}
-
-/* Empty State */
-.empty-state {
-    text-align: center;
-    padding: 3rem 1rem;
-    color: var(--text-secondary);
-}
-
-.empty-state p {
-    font-size: 1.1rem;
-}
-
-/* Hidden Class */
-.hidden {
-    display: none !important;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-    .container {
-        padding: 0 0.5rem;
-    }
-    
-    .dashboard-title {
-        font-size: 2rem;
-    }
-    
-    .stats-grid {
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1rem;
-    }
-    
-    .stat-card {
-        padding: 1.5rem;
-    }
-    
-    .stat-number {
-        font-size: 2rem;
-    }
-    
-    .caregiver-card {
-        flex-direction: column;
-        text-align: center;
-    }
-    
-    .request-card {
-        flex-direction: column;
-    }
-    
-    .request-actions {
-        align-items: stretch;
-    }
-    
-    .section-header {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    
-    .search-bar {
-        min-width: auto;
-    }
-    
-    .form-actions {
-        flex-direction: column;
-    }
-}
-
-@media (max-width: 480px) {
-    .stats-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .toggle-btn {
-        padding: 0.5rem 1rem;
-        font-size: 0.875rem;
-    }
-    
-    .caregiver-card,
-    .request-card {
-        padding: 1rem;
-    }
-}
-</style>
 </head>
 <body>
-    <!-- Header -->
     <?php include('includes/header.php'); ?>
 
-    <!-- User Type Toggle (only for users who are both pet owner and caregiver) -->
     <?php if ($is_petowner && $is_caregiver): ?>
-        <div class="user-type-toggle container">
+        <div class="user-type-toggle">
             <button class="toggle-btn active" onclick="switchUserType('petowner')" id="petownerBtn">Pet Owner</button>
             <button class="toggle-btn" onclick="switchUserType('caregiver')" id="caregiverBtn">Caregiver</button>
         </div>
     <?php endif; ?>
 
     <div class="container">
+        <div class="messages-container">
+            <button class="messages-btn" onclick="toggleMessagesDropdown()">
+                <svg class="messages-icon" viewBox="0 0 24 24">
+                    <path d="M20 2H4a2 2 0 00-2 2v12a2 2 0 002 2h4l4 4 4-4h4a2 2 0 002-2V4a2 2 0 00-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+                </svg>
+                <?php if (count($messages) > 0): ?>
+                <span class="messages-count"><?php echo count($messages); ?></span>
+                <?php endif; ?>
+            </button>
+            <div class="messages-dropdown" id="messagesDropdown">
+                <?php if (empty($messages)): ?>
+                <div class="empty-state">
+                    <p>No messages found.</p>
+                </div>
+                <?php else: ?>
+                <?php foreach ($messages as $message): ?>
+                <div class="message-item <?php echo $message['IsRead'] == 0 ? 'unread' : ''; ?>">
+                    <div class="message-sender"><?php echo htmlspecialchars($message['FullName']); ?></div>
+                    <div class="message-content"><?php echo htmlspecialchars($message['MessageContent']); ?></div>
+                    <div class="message-time"><?php echo date('M d, Y H:i', strtotime($message['CreatedAt'])); ?></div>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="dashboard-header">
             <h1 class="dashboard-title" id="dashboardTitle">
                 <?php echo $is_caregiver && !$is_petowner ? 'Caregiver Dashboard' : 'Pet Owner Dashboard'; ?>
@@ -784,9 +264,18 @@ body {
             </div>
         </div>
 
-        <!-- Pet Owner Dashboard -->
         <?php if ($is_petowner): ?>
         <div id="petownerDashboard" class="<?php echo $is_caregiver ? 'hidden' : ''; ?>">
+            <?php if (!empty($notifications)): ?>
+            <div class="notifications">
+                <?php foreach ($notifications as $notification): ?>
+                <div class="notification-message notification-<?php echo strpos($notification['MessageContent'], 'approved') !== false ? 'approved' : 'declined'; ?>">
+                    <p><strong><?php echo htmlspecialchars($notification['FullName']); ?>:</strong> <?php echo htmlspecialchars($notification['MessageContent']); ?></p>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-number"><?php echo $pet_count; ?></div>
@@ -814,8 +303,6 @@ body {
                 </div>
             </div>
 
-            
-
             <div class="requests-section">
                 <div class="section-header">
                     <h2 class="section-title">My Requests</h2>
@@ -825,13 +312,15 @@ body {
                 <div id="petownerRequests">
                     <?php 
                     $stmt = $conn->prepare("
-                        SELECT cr.*, u.FullName, a.Name as PetName, s.Name as SpeciesName, gp.PricePerNight
+                        SELECT cr.*, u.FullName, GROUP_CONCAT(a.Name) as PetNames, GROUP_CONCAT(s.Name) as SpeciesNames, gp.PricePerNight
                         FROM carerequest cr
                         JOIN _user u ON cr.ProfileID = u.UserID
-                        JOIN animal a ON a.UserID = cr.UserID
+                        JOIN carerequest_animals cra ON cr.RequestID = cra.RequestID
+                        JOIN animal a ON cra.AnimalID = a.AnimalID
                         JOIN species s ON a.SpeciesID = s.SpeciesID
                         JOIN guardianprofile gp ON cr.ProfileID = gp.ProfileID
                         WHERE cr.UserID = ?
+                        GROUP BY cr.RequestID
                     ");
                     $stmt->execute([$user_id]);
                     $my_requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -847,7 +336,7 @@ body {
                         <div class="request-info">
                             <div class="request-name"><?php echo htmlspecialchars($request['FullName']); ?></div>
                             <div class="request-details">
-                                <?php echo htmlspecialchars($request['SpeciesName'] . ' care for ' . $request['PetName'] . ' • ' . 
+                                <?php echo htmlspecialchars($request['SpeciesNames'] . ' care for ' . $request['PetNames'] . ' • ' . 
                                     date('M d', strtotime($request['StartDate'])) . '-' . date('M d, Y', strtotime($request['EndDate']))); ?>
                             </div>
                             <div class="request-meta">
@@ -868,7 +357,6 @@ body {
         </div>
         <?php endif; ?>
 
-        <!-- Caregiver Dashboard -->
         <?php if ($is_caregiver): ?>
         <div id="caregiverDashboard" class="<?php echo $is_petowner ? 'hidden' : ''; ?>">
             <div class="stats-grid">
@@ -907,7 +395,7 @@ body {
                         <div class="request-info">
                             <div class="request-name"><?php echo htmlspecialchars($request['FullName']); ?></div>
                             <div class="request-details">
-                                <?php echo htmlspecialchars($request['SpeciesName'] . ' care needed • ' . $request['PetName'] . ' • ' . 
+                                <?php echo htmlspecialchars($request['SpeciesNames'] . ' care needed • ' . $request['PetNames'] . ' • ' . 
                                     date('M d', strtotime($request['StartDate'])) . '-' . date('M d, Y', strtotime($request['EndDate']))); ?>
                             </div>
                             <div class="request-meta">
@@ -925,17 +413,25 @@ body {
                             <form method="POST">
                                 <input type="hidden" name="action" value="update_request">
                                 <input type="hidden" name="request_id" value="<?php echo $request['RequestID']; ?>">
-                                <div class="form-group">
-                                    <label for="status-<?php echo $request['RequestID']; ?>">Update Status:</label>
-                                    <select name="status" id="status-<?php echo $request['RequestID']; ?>" required>
+                                <div class="edit-form-header">
+                                    <h3 class="edit-form-title">Update Request Status</h3>
+                                    <button type="button" class="edit-form-close" onclick="toggleEditForm(<?php echo $request['RequestID']; ?>)">
+                                        <svg viewBox="0 0 24 24">
+                                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="edit-form-group">
+                                    <label class="edit-form-label" for="status-<?php echo $request['RequestID']; ?>">Status</label>
+                                    <select name="status" id="status-<?php echo $request['RequestID']; ?>" class="edit-form-select" required>
                                         <option value="Pending" <?php echo $request['Status'] === 'Pending' ? 'selected' : ''; ?>>Pending</option>
                                         <option value="Approved" <?php echo $request['Status'] === 'Approved' ? 'selected' : ''; ?>>Approved</option>
                                         <option value="Declined" <?php echo $request['Status'] === 'Declined' ? 'selected' : ''; ?>>Declined</option>
                                     </select>
                                 </div>
-                                <div class="form-actions">
-                                    <button type="submit" class="btn btn-primary">Save Changes</button>
-                                    <button type="button" class="btn btn-decline" onclick="toggleEditForm(<?php echo $request['RequestID']; ?>)">Cancel</button>
+                                <div class="edit-form-actions">
+                                    <button type="submit" class="edit-form-btn edit-form-btn-primary">Update Status</button>
+                                    <button type="button" class="edit-form-btn edit-form-btn-secondary" onclick="toggleEditForm(<?php echo $request['RequestID']; ?>)">Cancel</button>
                                 </div>
                             </form>
                         </div>
@@ -948,29 +444,21 @@ body {
         <?php endif; ?>
     </div>
 
-    <!-- Footer -->
     <?php include('includes/footer.php'); ?> 
 
     <script>
         <?php if ($is_petowner && $is_caregiver): ?>
         function switchUserType(type) {
-            // Toggle dashboard visibility
             document.getElementById('petownerDashboard').classList.toggle('hidden', type !== 'petowner');
             document.getElementById('caregiverDashboard').classList.toggle('hidden', type !== 'caregiver');
-            
-            // Update dashboard title
             document.getElementById('dashboardTitle').textContent = 
                 type === 'petowner' ? 'Pet Owner Dashboard' : 'Caregiver Dashboard';
-            
-            // Update sidebar content
             document.getElementById('sidebarTitle').textContent = 
                 type === 'petowner' ? 'MY ANIMALS' : 'MY REQUESTS';
             document.getElementById('sidebarItem').textContent = 
                 type === 'petowner' ? '🐾 My Pets' : '📋 Received';
             document.getElementById('sidebarItem').nextElementSibling.textContent = 
                 type === 'petowner' ? <?php echo $pet_count; ?> : <?php echo $request_counts['pending']; ?>;
-            
-            // Update toggle button active state
             document.getElementById('petownerBtn').classList.toggle('active', type === 'petowner');
             document.getElementById('caregiverBtn').classList.toggle('active', type === 'caregiver');
         }
@@ -990,6 +478,11 @@ body {
             form.classList.toggle('active');
         }
 
+        function toggleMessagesDropdown() {
+            const dropdown = document.getElementById('messagesDropdown');
+            dropdown.classList.toggle('active');
+        }
+
         function logout() {
             if (confirm('Are you sure you want to logout?')) {
                 window.location.href = 'auth/login.php';
@@ -1004,6 +497,14 @@ body {
             <?php elseif ($is_petowner && $is_caregiver): ?>
             switchUserType('petowner');
             <?php endif; ?>
+
+            document.addEventListener('click', function(event) {
+                const dropdown = document.getElementById('messagesDropdown');
+                const button = document.querySelector('.messages-btn');
+                if (!dropdown.contains(event.target) && !button.contains(event.target)) {
+                    dropdown.classList.remove('active');
+                }
+            });
         });
     </script>
 </body>

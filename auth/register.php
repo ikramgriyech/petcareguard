@@ -37,6 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
 
             $success = " Registration successful!";
+            header('Location: ../auth/login.php');
         } catch (PDOException $e) {
             if ($e->errorInfo[1] == 1062) {
                 $errors[] = "Email already exists.";
@@ -125,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <button type="submit" class="submit-btn">Join MarocPattes</button>
                     
                     <div class="login-link">
-                        Already have an account? <a href="#">Log in</a>
+                        Already have an account? <a href="login.php">Log in</a>
                     </div>
                 </form>
             </div>

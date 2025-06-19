@@ -11,8 +11,6 @@ try {
     // Enable error reporting mode
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Success message
-    //echo "✅ Successfully connected to the database!";
 } catch (PDOException $e) {
     // Error message
     die(" Connection failed: " . $e->getMessage());

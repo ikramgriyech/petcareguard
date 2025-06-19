@@ -107,19 +107,16 @@ $logoPath = $isAuthPage ? '../assets/img/logo.png' : 'assets/img/logo.png';
 
     <ul class="nav-links">
       <?php if (isset($_SESSION['user'])): ?>
-        <?php if ($currentPage === 'login.php'): ?>
-          <!-- If on login.php and logged in, show only Home -->
-          <li><a href="#contact">Contact</a></li>
+        <!-- Logged in user -->        
+        <li><a href="landing.php">Home</a></li>
+        <li><a href="caregivers.php">Caregivers</a></li>
+        <li><a href="dashboard.php">Dashboard</a></li>
+        <li><a href="<?= $profilePath ?>">My Profile</a></li>
+      <?php else: ?>
+        <!-- Guest user (not logged in) -->
+        <li><a href="#contact">Contact</a></li>
         <li><a href="#services">Services</a></li>
         <li><a href="#learn">Home</a></li>
-        <?php else: ?>
-          <!-- If on other pages and logged in, show all -->
-          <li><a href="dashboard.php">Dashboard</a></li>
-          <li><a href="caregivers.php">Caregivers</a></li>
-          <li><a href="landing.php">Home</a></li>
-          <li><a href="<?= $profilePath ?>">My Profile</a></li>
-        <?php endif; ?>
-
       <?php endif; ?>
     </ul>
 
@@ -130,6 +127,7 @@ $logoPath = $isAuthPage ? '../assets/img/logo.png' : 'assets/img/logo.png';
     <?php endif; ?>
   </nav>
 </header>
+
 
 
 
